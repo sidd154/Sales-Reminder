@@ -1669,7 +1669,7 @@ class SalesIntelligenceSystem:
                 logger.info("No sales alerts triggered during scan.")
                 return 0
                 
-            logger.warning(f"{len(alerts)} sales alerts triggered! Sending warnings via SMTP...")
+            logger.warning(f"{len(alerts)} sales alerts triggered! Sending warnings...")
             
             # Format alert notifications
             subject = f"🚨 URGENT: Pixel Studios Sales Alerts ({len(alerts)})"
@@ -1722,14 +1722,7 @@ def run_scheduler_loop():
     # Daily sales reminder at 08:00 AM IST (Assumes local runner is configured in IST timezone)
     schedule.every().day.at("08:00").do(SalesIntelligenceSystem.run_daily_report)
     
-    # Scan critical SLA alerts every hour
-    schedule.every().hour.do(SalesIntelligenceSystem.run_alerts_check)
-    
     logger.info("CEO Sales Reminder scheduler is RUNNING. Press Ctrl+C to terminate.")
-    
-    # Run a pipeline checks to verify setup immediately upon scheduler start
-    logger.info("Executing initial startup dry-run checks...")
-    SalesIntelligenceSystem.run_alerts_check()
     
     try:
         while True:
