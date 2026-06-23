@@ -1719,8 +1719,8 @@ def run_scheduler_loop():
         
     logger.info("Initializing schedule loops...")
     
-    # Daily sales reminder at 08:00 AM IST (Assumes local runner is configured in IST timezone)
-    schedule.every().day.at("08:00").do(SalesIntelligenceSystem.run_daily_report)
+    # Daily sales reminder at 05:30 AM UTC (11:00 AM IST)
+    schedule.every().day.at("05:30").do(SalesIntelligenceSystem.run_daily_report)
     
     logger.info("CEO Sales Reminder scheduler is RUNNING. Press Ctrl+C to terminate.")
     
