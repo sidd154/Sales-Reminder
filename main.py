@@ -1587,11 +1587,6 @@ class SalesIntelligenceSystem:
             lines.append("")
             lines.append("Leads Received ( so for the month ): 10")
             lines.append("")
-            lines.append("In Leads Pipeline ( all currently  ): 3")
-            lines.append("• Charlie Brown (Status: Contacted, Owner: Rohan Sharma)")
-            lines.append("• Diana Prince (Status: Proposal, Owner: Sarah Khan)")
-            lines.append("• Bruce Wayne (Status: Negotiation, Owner: Siddhanth)")
-            lines.append("")
             lines.append("Leads to Deals Moved ( for the week ): 1")
             lines.append("• Acme Corporation Deal")
             lines.append("  Source: Inbound Website")
@@ -1613,10 +1608,8 @@ class SalesIntelligenceSystem:
             lines.append("Deals from Outbound Calls ( so far this month ): 3")
             lines.append("")
             lines.append("Deals Moved ( for the week ): 2")
-            lines.append("• Stark Industries")
-            lines.append("  Proposal ➔ Closed Won")
-            lines.append("• LexCorp")
-            lines.append("  Qualification ➔ Proposal")
+            lines.append("• Stark Industries: Proposal → Closed Won")
+            lines.append("• LexCorp: Qualification → Proposal")
             return "\n".join(lines)
 
         today_date = date.today()
@@ -1670,25 +1663,7 @@ class SalesIntelligenceSystem:
             logger.error(f"Failed to fetch leads for the month: {e}")
             leads_month_count = 0
             
-        # 3. In Leads Pipeline (all currently)
-        leads_pipeline_details = []
-        try:
-            all_leads = client.execute_coql(
-                "select id, First_Name, Last_Name, Lead_Status, Owner.first_name, Owner.last_name "
-                "from Leads where Modified_Time >= '2000-01-01T00:00:00+05:30'"
-            )
-            pipeline_leads = [l for l in all_leads if l.get("Lead_Status") not in ("Junk Lead", "Lost Lead")]
-            leads_pipeline_count = len(pipeline_leads)
-            for l in pipeline_leads:
-                first = l.get("First_Name") or ""
-                last = l.get("Last_Name") or ""
-                name = f"{first} {last}".strip() or "Unknown Lead"
-                status = l.get("Lead_Status") or "None"
-                owner = get_owner_name(l)
-                leads_pipeline_details.append(f"• {name} (Status: {status}, Owner: {owner})")
-        except Exception as e:
-            logger.error(f"Failed to fetch active leads pipeline: {e}")
-            leads_pipeline_count = 0
+        # 3. (Leads Pipeline query removed)
             
         # 4. Leads to Deals Moved (for the week)
         deals_week_details = []
@@ -1791,7 +1766,7 @@ class SalesIntelligenceSystem:
                         old_stage = base_deals[did].get("stage") or "None"
                         new_stage = curr_deal.get("stage") or "None"
                         if old_stage != new_stage:
-                            deals_moved_details.append(f"• {curr_deal.get('name')}\n  {old_stage} ➔ {new_stage}")
+                            deals_moved_details.append(f"• {curr_deal.get('name')}: {old_stage} → {new_stage}")
             except Exception as e:
                 logger.error(f"Failed to calculate deal movements from weekly baseline: {e}")
                 
@@ -1822,13 +1797,6 @@ class SalesIntelligenceSystem:
             
         lines.append("")
         lines.append(f"Leads Received ( so for the month ): {leads_month_count}")
-        
-        lines.append("")
-        lines.append(f"In Leads Pipeline ( all currently  ): {leads_pipeline_count}")
-        if leads_pipeline_details:
-            lines.extend(leads_pipeline_details)
-        else:
-            lines.append("None")
             
         lines.append("")
         lines.append(f"Leads to Deals Moved ( for the week ): {deals_week_count}")
