@@ -114,6 +114,7 @@ class Config:
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     EMAIL_FROM: str = os.getenv("EMAIL_FROM", "Report Bot <reminder@pixelsoft.in>")
     EMAIL_TO: str = os.getenv("EMAIL_TO", "siddhanthsrinivasan@gmail.com")
+    WEEKLY_EMAIL_TO: str = os.getenv("WEEKLY_EMAIL_TO", "siddhanthsrinivasan@gmail.com")
 
     # SLA and Threshold configurations
     ALERT_SLA_HOURS: int = int(os.getenv("ALERT_SLA_HOURS", "24"))
@@ -1548,6 +1549,219 @@ class SalesIntelligenceSystem:
         return "\n".join(lines)
 
     @classmethod
+    def run_daily_snapshot(cls) -> bool:
+        """Captures the daily CRM snapshot and saves it silently without sending emails."""
+        logger.info("--- STARTING SILENT DAILY SNAPSHOT CAPTURE ---")
+        SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crm_snapshot.json")
+        try:
+            client = ZohoClient()
+            curr_snap = cls.capture_crm_snapshot(client)
+            
+            # Save current snapshot for next run
+            if not config.MOCK_MODE:
+                try:
+                    with open(SNAPSHOT_FILE, "w") as f:
+                        json.dump(curr_snap, f)
+                    logger.info("CRM baseline snapshot saved successfully.")
+                except Exception as e:
+                    logger.warning(f"Failed to save CRM snapshot: {e}")
+            else:
+                logger.info("MOCK_MODE=True: Snapshot save simulated.")
+                
+            return True
+        except Exception as e:
+            logger.error(f"Daily snapshot capture failed: {e}", exc_info=True)
+            return False
+
+    @classmethod
+    def generate_weekly_report(cls, client: ZohoClient) -> str:
+        """Generates the text for the Monday Weekly Report."""
+        if config.MOCK_MODE:
+            # Return simulated mock data for weekly report
+            lines = []
+            lines.append("Monday Report ( Weekly )")
+            lines.append("")
+            lines.append("Leads Received ( for the week ): 12")
+            lines.append("Leads Received ( so for the month ): 45")
+            lines.append("In Leads Pipeline ( all currently  ): 150")
+            lines.append("")
+            lines.append("Leads to Deals Moved ( for the week ): 4")
+            lines.append("Leads to Deals moved (so far this month): 15")
+            lines.append("")
+            lines.append("Outbound")
+            lines.append("Calls Made ( for the week ): 35")
+            lines.append("Calls Made ( so far this month ): 120")
+            lines.append("Deals from Outbound Calls ( for the week ): 2")
+            lines.append("Deals from Outbound Calls ( so far this month ): 6")
+            return "\n".join(lines)
+
+        today_date = date.today()
+        
+        # Calculate weekly and monthly date thresholds in IST (+05:30)
+        # Prev Monday 00:00:00 to Prev Sunday 23:59:59
+        start_of_week = today_date - timedelta(days=7)
+        end_of_week = today_date - timedelta(days=1)
+        
+        start_week_iso = f"{start_of_week.strftime('%Y-%m-%d')}T00:00:00+05:30"
+        end_week_iso = f"{end_of_week.strftime('%Y-%m-%d')}T23:59:59+05:30"
+        
+        # 1st of current month to today
+        start_of_month = today_date.replace(day=1)
+        start_month_iso = f"{start_of_month.strftime('%Y-%m-%d')}T00:00:00+05:30"
+        end_month_iso = f"{today_date.strftime('%Y-%m-%d')}T23:59:59+05:30"
+        
+        # 1. Leads Received (for the week)
+        try:
+            leads_week = client.fetch_leads_created_between(start_week_iso, end_week_iso)
+            leads_week_count = len(leads_week)
+        except Exception as e:
+            logger.error(f"Failed to fetch leads for the week: {e}")
+            leads_week_count = 0
+            
+        # 2. Leads Received (so far this month)
+        try:
+            leads_month = client.fetch_leads_created_between(start_month_iso, end_month_iso)
+            leads_month_count = len(leads_month)
+        except Exception as e:
+            logger.error(f"Failed to fetch leads for the month: {e}")
+            leads_month_count = 0
+            
+        # 3. In Leads Pipeline (all currently)
+        try:
+            all_leads = client.execute_coql("select id, Lead_Status from Leads")
+            pipeline_leads = [l for l in all_leads if l.get("Lead_Status") not in ("Junk Lead", "Lost Lead")]
+            leads_pipeline_count = len(pipeline_leads)
+        except Exception as e:
+            logger.error(f"Failed to fetch active leads pipeline: {e}")
+            leads_pipeline_count = 0
+            
+        # 4. Leads to Deals Moved (for the week)
+        try:
+            deals_week = client.execute_coql(
+                f"select id, Lead_Source from Deals where Created_Time >= '{start_week_iso}' and Created_Time <= '{end_week_iso}'"
+            )
+            deals_week_count = len(deals_week)
+        except Exception as e:
+            logger.error(f"Failed to fetch deals created for the week: {e}")
+            deals_week_count = 0
+            
+        # 5. Leads to Deals moved (so far this month)
+        try:
+            deals_month = client.execute_coql(
+                f"select id, Lead_Source from Deals where Created_Time >= '{start_month_iso}' and Created_Time <= '{end_month_iso}'"
+            )
+            deals_month_count = len(deals_month)
+        except Exception as e:
+            logger.error(f"Failed to fetch deals created for the month: {e}")
+            deals_month_count = 0
+            
+        # 6. Outbound Calls Made (for the week)
+        try:
+            calls_week = client.execute_coql(
+                f"select id from Calls where Call_Start_Time >= '{start_week_iso}' and Call_Start_Time <= '{end_week_iso}' and Call_Type = 'Outbound'"
+            )
+            calls_week_count = len(calls_week)
+        except Exception as e:
+            logger.error(f"Failed to fetch calls for the week: {e}")
+            calls_week_count = 0
+            
+        # 7. Outbound Calls Made (so far this month)
+        try:
+            calls_month = client.execute_coql(
+                f"select id from Calls where Call_Start_Time >= '{start_month_iso}' and Call_Start_Time <= '{end_month_iso}' and Call_Type = 'Outbound'"
+            )
+            calls_month_count = len(calls_month)
+        except Exception as e:
+            logger.error(f"Failed to fetch calls for the month: {e}")
+            calls_month_count = 0
+            
+        # 8. Deals from Outbound Calls (for the week)
+        try:
+            deals_outbound_week = [
+                d for d in deals_week 
+                if "outbound" in (d.get("Lead_Source") or "").lower()
+            ]
+            deals_outbound_week_count = len(deals_outbound_week)
+        except Exception as e:
+            logger.error(f"Failed to calculate outbound deals for the week: {e}")
+            deals_outbound_week_count = 0
+            
+        # 9. Deals from Outbound Calls (so far this month)
+        try:
+            deals_outbound_month = [
+                d for d in deals_month 
+                if "outbound" in (d.get("Lead_Source") or "").lower()
+            ]
+            deals_outbound_month_count = len(deals_outbound_month)
+        except Exception as e:
+            logger.error(f"Failed to calculate outbound deals for the month: {e}")
+            deals_outbound_month_count = 0
+            
+        # Build layout lines
+        lines = []
+        lines.append("Monday Report ( Weekly )")
+        lines.append("")
+        lines.append(f"Leads Received ( for the week ): {leads_week_count}")
+        lines.append(f"Leads Received ( so for the month ): {leads_month_count}")
+        lines.append(f"In Leads Pipeline ( all currently  ): {leads_pipeline_count}")
+        lines.append("")
+        lines.append(f"Leads to Deals Moved ( for the week ): {deals_week_count}")
+        lines.append(f"Leads to Deals moved (so far this month): {deals_month_count}")
+        lines.append("")
+        lines.append("Outbound")
+        lines.append(f"Calls Made ( for the week ): {calls_week_count}")
+        lines.append(f"Calls Made ( so far this month ): {calls_month_count}")
+        lines.append(f"Deals from Outbound Calls ( for the week ): {deals_outbound_week_count}")
+        lines.append(f"Deals from Outbound Calls ( so far this month ): {deals_outbound_month_count}")
+        
+        return "\n".join(lines)
+
+    @classmethod
+    def run_weekly_report(cls) -> bool:
+        """Executes the weekly scheduled report workflow."""
+        logger.info("--- STARTING WEEKLY SALES REPORT DISPATCH ---")
+        try:
+            client = ZohoClient()
+            report_text = cls.generate_weekly_report(client)
+            
+            # Build HTML and text email body
+            text_body = report_text
+            html_body = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Pixel Studios Weekly Sales Update</title>
+</head>
+<body style="font-family: monospace; font-size: 14px; line-height: 1.5; color: #333333; background-color: #ffffff; padding: 20px;">
+    <pre style="white-space: pre-wrap; font-family: monospace; font-size: 14px; margin: 0; background-color: #fcfcfc; border: 1px solid #e0e0e0; padding: 25px; border-radius: 6px;">{report_text}</pre>
+</body>
+</html>"""
+            
+            recipient = config.WEEKLY_EMAIL_TO if config.WEEKLY_EMAIL_TO else config.EMAIL_TO
+            logger.info(f"Preparing to send weekly report to {recipient} via Resend...")
+            
+            old_to = config.EMAIL_TO
+            config.EMAIL_TO = recipient
+            try:
+                success = EmailClient.send_email(
+                    subject=f"Monday Report ( Weekly ) - {date.today().strftime('%A, %d %b %Y')}",
+                    html_content=html_body,
+                    text_content=text_body
+                )
+            finally:
+                config.EMAIL_TO = old_to
+                
+            if success:
+                logger.info("Weekly sales report complete and dispatched successfully.")
+            else:
+                logger.error("Failed to deliver weekly sales report.")
+                
+            return success
+        except Exception as e:
+            logger.critical(f"Weekly Briefing Pipeline crashed: {e}", exc_info=True)
+            return False
+
+    @classmethod
     def run_daily_report(cls) -> bool:
         """Executes the daily scheduled change detection and reporting workflow."""
         logger.info("--- STARTING DAILY SALES BRIEFING DISPATCH ---")
@@ -1719,8 +1933,15 @@ def run_scheduler_loop():
         
     logger.info("Initializing schedule loops...")
     
-    # Daily sales reminder at 05:30 AM UTC (11:00 AM IST)
-    schedule.every().day.at("05:30").do(SalesIntelligenceSystem.run_daily_report)
+    # Weekday silent snapshots at 05:30 AM UTC (11:00 AM IST) - Mon to Fri only
+    schedule.every().monday.at("05:30").do(SalesIntelligenceSystem.run_daily_snapshot)
+    schedule.every().tuesday.at("05:30").do(SalesIntelligenceSystem.run_daily_snapshot)
+    schedule.every().wednesday.at("05:30").do(SalesIntelligenceSystem.run_daily_snapshot)
+    schedule.every().thursday.at("05:30").do(SalesIntelligenceSystem.run_daily_snapshot)
+    schedule.every().friday.at("05:30").do(SalesIntelligenceSystem.run_daily_snapshot)
+    
+    # Monday Weekly Report at 02:30 AM UTC (08:00 AM IST)
+    schedule.every().monday.at("02:30").do(SalesIntelligenceSystem.run_weekly_report)
     
     logger.info("CEO Sales Reminder scheduler is RUNNING. Press Ctrl+C to terminate.")
     
@@ -1739,6 +1960,7 @@ def main():
     parser.add_argument("--check-alerts", action="store_true", help="Manually run the compliance alerts check.")
     parser.add_argument("--run-all", action="store_true", help="Execute both report and alert check.")
     parser.add_argument("--test", action="store_true", help="Forces MOCK_MODE=True and tests email report outputs locally.")
+    parser.add_argument("--weekly-report", action="store_true", help="Manually run the weekly sales report flow.")
     parser.add_argument("--schedule", action="store_true", help="Start the daemon scheduling loop.")
     
     args = parser.parse_args()
@@ -1752,11 +1974,19 @@ def main():
         AlertsEngine._save_pipeline_total(1800000.0) # Baseline value
         
         report_success = SalesIntelligenceSystem.run_daily_report()
-        logger.info(f"Verification report run completed. Result: {'SUCCESS' if report_success else 'FAILED'}")
-        sys.exit(0 if report_success else 1)
+        logger.info(f"Daily report run completed. Result: {'SUCCESS' if report_success else 'FAILED'}")
+        
+        weekly_success = SalesIntelligenceSystem.run_weekly_report()
+        logger.info(f"Weekly report run completed. Result: {'SUCCESS' if weekly_success else 'FAILED'}")
+        
+        sys.exit(0 if (report_success and weekly_success) else 1)
         
     elif args.daily_report:
         success = SalesIntelligenceSystem.run_daily_report()
+        sys.exit(0 if success else 1)
+        
+    elif args.weekly_report:
+        success = SalesIntelligenceSystem.run_weekly_report()
         sys.exit(0 if success else 1)
         
     elif args.check_alerts:
