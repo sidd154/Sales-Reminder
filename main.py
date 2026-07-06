@@ -114,7 +114,7 @@ class Config:
     RESEND_API_KEY: str = os.getenv("RESEND_API_KEY", "")
     EMAIL_FROM: str = os.getenv("EMAIL_FROM", "Report Bot <reminder@pixelsoft.in>")
     EMAIL_TO: str = os.getenv("EMAIL_TO", "siddhanthsrinivasan@gmail.com")
-    WEEKLY_EMAIL_TO: str = os.getenv("WEEKLY_EMAIL_TO", "siddhanthsrinivasan@gmail.com")
+    WEEKLY_EMAIL_TO: str = os.getenv("WEEKLY_EMAIL_TO", "")
 
     # SLA and Threshold configurations
     ALERT_SLA_HOURS: int = int(os.getenv("ALERT_SLA_HOURS", "24"))
@@ -1581,18 +1581,42 @@ class SalesIntelligenceSystem:
             lines = []
             lines.append("Monday Report ( Weekly )")
             lines.append("")
-            lines.append("Leads Received ( for the week ): 12")
-            lines.append("Leads Received ( so for the month ): 45")
-            lines.append("In Leads Pipeline ( all currently  ): 150")
+            lines.append("Leads Received ( for the week ): 2")
+            lines.append("• Alice Smith (Owner: Rohan Sharma)")
+            lines.append("• Bob Jones (Owner: Sarah Khan)")
             lines.append("")
-            lines.append("Leads to Deals Moved ( for the week ): 4")
-            lines.append("Leads to Deals moved (so far this month): 15")
+            lines.append("Leads Received ( so for the month ): 10")
+            lines.append("")
+            lines.append("In Leads Pipeline ( all currently  ): 3")
+            lines.append("• Charlie Brown (Status: Contacted, Owner: Rohan Sharma)")
+            lines.append("• Diana Prince (Status: Proposal, Owner: Sarah Khan)")
+            lines.append("• Bruce Wayne (Status: Negotiation, Owner: Siddhanth)")
+            lines.append("")
+            lines.append("Leads to Deals Moved ( for the week ): 1")
+            lines.append("• Acme Corporation Deal")
+            lines.append("  Source: Inbound Website")
+            lines.append("  Value: ₹500,000")
+            lines.append("  Owner: Rohan Sharma")
+            lines.append("")
+            lines.append("Leads to Deals moved (so far this month): 4")
             lines.append("")
             lines.append("Outbound")
             lines.append("Calls Made ( for the week ): 35")
             lines.append("Calls Made ( so far this month ): 120")
-            lines.append("Deals from Outbound Calls ( for the week ): 2")
-            lines.append("Deals from Outbound Calls ( so far this month ): 6")
+            lines.append("")
+            lines.append("Deals from Outbound Calls ( for the week ): 1")
+            lines.append("• Wayne Enterprises Deal")
+            lines.append("  Source: Outbound")
+            lines.append("  Value: ₹1,200,000")
+            lines.append("  Owner: Siddhanth")
+            lines.append("")
+            lines.append("Deals from Outbound Calls ( so far this month ): 3")
+            lines.append("")
+            lines.append("Deals Moved ( for the week ): 2")
+            lines.append("• Stark Industries")
+            lines.append("  Proposal ➔ Closed Won")
+            lines.append("• LexCorp")
+            lines.append("  Qualification ➔ Proposal")
             return "\n".join(lines)
 
         today_date = date.today()
@@ -1610,10 +1634,30 @@ class SalesIntelligenceSystem:
         start_month_iso = f"{start_of_month.strftime('%Y-%m-%d')}T00:00:00+05:30"
         end_month_iso = f"{today_date.strftime('%Y-%m-%d')}T23:59:59+05:30"
         
+        def format_value(val: Any) -> str:
+            try:
+                num = float(val)
+                return f"₹{num:,.0f}"
+            except (ValueError, TypeError):
+                return "₹0"
+                
+        def get_owner_name(item: Dict[str, Any]) -> str:
+            owner_dict = item.get("Owner") or {}
+            first = owner_dict.get("first_name") or ""
+            last = owner_dict.get("last_name") or ""
+            return f"{first} {last}".strip() or "Unassigned"
+            
         # 1. Leads Received (for the week)
+        leads_week_details = []
         try:
             leads_week = client.fetch_leads_created_between(start_week_iso, end_week_iso)
             leads_week_count = len(leads_week)
+            for l in leads_week:
+                first = l.get("First_Name") or ""
+                last = l.get("Last_Name") or ""
+                name = f"{first} {last}".strip() or "Unknown Lead"
+                owner = get_owner_name(l)
+                leads_week_details.append(f"• {name} (Owner: {owner})")
         except Exception as e:
             logger.error(f"Failed to fetch leads for the week: {e}")
             leads_week_count = 0
@@ -1627,30 +1671,50 @@ class SalesIntelligenceSystem:
             leads_month_count = 0
             
         # 3. In Leads Pipeline (all currently)
+        leads_pipeline_details = []
         try:
-            all_leads = client.execute_coql("select id, Lead_Status from Leads where Modified_Time >= '2000-01-01T00:00:00+05:30'")
+            all_leads = client.execute_coql(
+                "select id, First_Name, Last_Name, Lead_Status, Owner.first_name, Owner.last_name "
+                "from Leads where Modified_Time >= '2000-01-01T00:00:00+05:30'"
+            )
             pipeline_leads = [l for l in all_leads if l.get("Lead_Status") not in ("Junk Lead", "Lost Lead")]
             leads_pipeline_count = len(pipeline_leads)
+            for l in pipeline_leads:
+                first = l.get("First_Name") or ""
+                last = l.get("Last_Name") or ""
+                name = f"{first} {last}".strip() or "Unknown Lead"
+                status = l.get("Lead_Status") or "None"
+                owner = get_owner_name(l)
+                leads_pipeline_details.append(f"• {name} (Status: {status}, Owner: {owner})")
         except Exception as e:
             logger.error(f"Failed to fetch active leads pipeline: {e}")
             leads_pipeline_count = 0
             
         # 4. Leads to Deals Moved (for the week)
+        deals_week_details = []
+        deals_week_raw = []
         try:
-            deals_week = client.execute_coql(
-                f"select id, Lead_Source from Deals where Created_Time >= '{start_week_iso}' and Created_Time <= '{end_week_iso}'"
+            deals_week_raw = client.execute_coql(
+                f"select id, Deal_Name, Lead_Source, Amount, Stage, Owner.first_name, Owner.last_name from Deals "
+                f"where Created_Time >= '{start_week_iso}' and Created_Time <= '{end_week_iso}'"
             )
-            deals_week_count = len(deals_week)
+            deals_week_count = len(deals_week_raw)
+            for d in deals_week_raw:
+                name = d.get("Deal_Name") or "Unknown Deal"
+                source = d.get("Lead_Source") or "None"
+                value = format_value(d.get("Amount"))
+                owner = get_owner_name(d)
+                deals_week_details.append(f"• {name}\n  Source: {source}\n  Value: {value}\n  Owner: {owner}")
         except Exception as e:
             logger.error(f"Failed to fetch deals created for the week: {e}")
             deals_week_count = 0
             
         # 5. Leads to Deals moved (so far this month)
         try:
-            deals_month = client.execute_coql(
-                f"select id, Lead_Source from Deals where Created_Time >= '{start_month_iso}' and Created_Time <= '{end_month_iso}'"
+            deals_month_raw = client.execute_coql(
+                f"select id from Deals where Created_Time >= '{start_month_iso}' and Created_Time <= '{end_month_iso}'"
             )
-            deals_month_count = len(deals_month)
+            deals_month_count = len(deals_month_raw)
         except Exception as e:
             logger.error(f"Failed to fetch deals created for the month: {e}")
             deals_month_count = 0
@@ -1678,20 +1742,30 @@ class SalesIntelligenceSystem:
             calls_month_count = 0
             
         # 8. Deals from Outbound Calls (for the week)
+        deals_outbound_week_details = []
+        deals_outbound_week_count = 0
         try:
             deals_outbound_week = [
-                d for d in deals_week 
+                d for d in deals_week_raw 
                 if "outbound" in (d.get("Lead_Source") or "").lower()
             ]
             deals_outbound_week_count = len(deals_outbound_week)
+            for d in deals_outbound_week:
+                name = d.get("Deal_Name") or "Unknown Deal"
+                source = d.get("Lead_Source") or "None"
+                value = format_value(d.get("Amount"))
+                owner = get_owner_name(d)
+                deals_outbound_week_details.append(f"• {name}\n  Source: {source}\n  Value: {value}\n  Owner: {owner}")
         except Exception as e:
             logger.error(f"Failed to calculate outbound deals for the week: {e}")
-            deals_outbound_week_count = 0
             
         # 9. Deals from Outbound Calls (so far this month)
         try:
+            deals_month_full = client.execute_coql(
+                f"select id, Lead_Source from Deals where Created_Time >= '{start_month_iso}' and Created_Time <= '{end_month_iso}'"
+            )
             deals_outbound_month = [
-                d for d in deals_month 
+                d for d in deals_month_full 
                 if "outbound" in (d.get("Lead_Source") or "").lower()
             ]
             deals_outbound_month_count = len(deals_outbound_month)
@@ -1699,23 +1773,95 @@ class SalesIntelligenceSystem:
             logger.error(f"Failed to calculate outbound deals for the month: {e}")
             deals_outbound_month_count = 0
             
+        # 10. Deals Moved (for the week)
+        deals_moved_details = []
+        WEEKLY_BASELINE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crm_snapshot_weekly_baseline.json")
+        if os.path.exists(WEEKLY_BASELINE_FILE):
+            try:
+                with open(WEEKLY_BASELINE_FILE, "r") as f:
+                    base_snap = json.load(f)
+                base_deals = base_snap.get("deals", {})
+                
+                # Compare to detect movements
+                curr_snap = cls.capture_crm_snapshot(client)
+                curr_deals = curr_snap.get("deals", {})
+                
+                for did, curr_deal in curr_deals.items():
+                    if did in base_deals:
+                        old_stage = base_deals[did].get("stage") or "None"
+                        new_stage = curr_deal.get("stage") or "None"
+                        if old_stage != new_stage:
+                            deals_moved_details.append(f"• {curr_deal.get('name')}\n  {old_stage} ➔ {new_stage}")
+            except Exception as e:
+                logger.error(f"Failed to calculate deal movements from weekly baseline: {e}")
+                
+        # Fallback
+        if not deals_moved_details:
+            try:
+                modified_deals = client.execute_coql(
+                    f"select id, Deal_Name, Stage, Owner.first_name, Owner.last_name from Deals "
+                    f"where Modified_Time >= '{start_week_iso}' and Modified_Time <= '{end_week_iso}'"
+                )
+                for d in modified_deals:
+                    name = d.get("Deal_Name") or "Unknown Deal"
+                    stage = d.get("Stage") or "None"
+                    owner = get_owner_name(d)
+                    deals_moved_details.append(f"• {name} (Current Stage: {stage}, Owner: {owner})")
+            except Exception as e:
+                logger.error(f"Failed to fetch modified deals fallback: {e}")
+                
         # Build layout lines
         lines = []
         lines.append("Monday Report ( Weekly )")
         lines.append("")
         lines.append(f"Leads Received ( for the week ): {leads_week_count}")
+        if leads_week_details:
+            lines.extend(leads_week_details)
+        else:
+            lines.append("None")
+            
+        lines.append("")
         lines.append(f"Leads Received ( so for the month ): {leads_month_count}")
+        
+        lines.append("")
         lines.append(f"In Leads Pipeline ( all currently  ): {leads_pipeline_count}")
+        if leads_pipeline_details:
+            lines.extend(leads_pipeline_details)
+        else:
+            lines.append("None")
+            
         lines.append("")
         lines.append(f"Leads to Deals Moved ( for the week ): {deals_week_count}")
+        if deals_week_details:
+            lines.extend(deals_week_details)
+        else:
+            lines.append("None")
+            
+        lines.append("")
         lines.append(f"Leads to Deals moved (so far this month): {deals_month_count}")
+        
         lines.append("")
         lines.append("Outbound")
         lines.append(f"Calls Made ( for the week ): {calls_week_count}")
         lines.append(f"Calls Made ( so far this month ): {calls_month_count}")
+        
+        lines.append("")
         lines.append(f"Deals from Outbound Calls ( for the week ): {deals_outbound_week_count}")
+        if deals_outbound_week_details:
+            lines.extend(deals_outbound_week_details)
+        else:
+            lines.append("None")
+            
+        lines.append("")
         lines.append(f"Deals from Outbound Calls ( so far this month ): {deals_outbound_month_count}")
         
+        lines.append("")
+        lines.append(f"Deals Moved ( for the week ): {len(deals_moved_details)}")
+        if deals_moved_details:
+            lines.extend(deals_moved_details)
+        else:
+            lines.append("None")
+            
         return "\n".join(lines)
 
     @classmethod
@@ -1755,6 +1901,17 @@ class SalesIntelligenceSystem:
                 
             if success:
                 logger.info("Weekly sales report complete and dispatched successfully.")
+                
+                # Save weekly baseline snapshot for next week's stage movements detection
+                if not config.MOCK_MODE:
+                    try:
+                        weekly_snap = cls.capture_crm_snapshot(client)
+                        WEEKLY_BASELINE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "crm_snapshot_weekly_baseline.json")
+                        with open(WEEKLY_BASELINE_FILE, "w") as f:
+                            json.dump(weekly_snap, f)
+                        logger.info("Saved crm_snapshot_weekly_baseline.json successfully.")
+                    except Exception as e:
+                        logger.warning(f"Failed to save weekly baseline snapshot: {e}")
             else:
                 logger.error("Failed to deliver weekly sales report.")
                 
