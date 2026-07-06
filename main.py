@@ -1628,7 +1628,7 @@ class SalesIntelligenceSystem:
             
         # 3. In Leads Pipeline (all currently)
         try:
-            all_leads = client.execute_coql("select id, Lead_Status from Leads")
+            all_leads = client.execute_coql("select id, Lead_Status from Leads where Modified_Time >= '2000-01-01T00:00:00+05:30'")
             pipeline_leads = [l for l in all_leads if l.get("Lead_Status") not in ("Junk Lead", "Lost Lead")]
             leads_pipeline_count = len(pipeline_leads)
         except Exception as e:
@@ -1657,9 +1657,10 @@ class SalesIntelligenceSystem:
             
         # 6. Outbound Calls Made (for the week)
         try:
-            calls_week = client.execute_coql(
-                f"select id from Calls where Call_Start_Time >= '{start_week_iso}' and Call_Start_Time <= '{end_week_iso}' and Call_Type = 'Outbound'"
+            calls_week_raw = client.execute_coql(
+                f"select id, Call_Type from Calls where Call_Start_Time >= '{start_week_iso}' and Call_Start_Time <= '{end_week_iso}'"
             )
+            calls_week = [c for c in calls_week_raw if (c.get("Call_Type") or "").lower() == "outbound"]
             calls_week_count = len(calls_week)
         except Exception as e:
             logger.error(f"Failed to fetch calls for the week: {e}")
@@ -1667,9 +1668,10 @@ class SalesIntelligenceSystem:
             
         # 7. Outbound Calls Made (so far this month)
         try:
-            calls_month = client.execute_coql(
-                f"select id from Calls where Call_Start_Time >= '{start_month_iso}' and Call_Start_Time <= '{end_month_iso}' and Call_Type = 'Outbound'"
+            calls_month_raw = client.execute_coql(
+                f"select id, Call_Type from Calls where Call_Start_Time >= '{start_month_iso}' and Call_Start_Time <= '{end_month_iso}'"
             )
+            calls_month = [c for c in calls_month_raw if (c.get("Call_Type") or "").lower() == "outbound"]
             calls_month_count = len(calls_month)
         except Exception as e:
             logger.error(f"Failed to fetch calls for the month: {e}")
